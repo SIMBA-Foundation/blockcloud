@@ -1,0 +1,278 @@
+<html>
+<head><title>6. Compiling and running the prototype on the android dev phone</title></head>
+<body>
+    <h2>6. Compiling and running the prototype on the android dev phone</h2>
+    The prototype for the android dev phone consists of several pieces:
+    <ol>
+        <li><a href="#kernel">A modified Linux kernel</a>.
+        The modified kernel contains the name-oriented stack component
+        directly, rather than being a loadable kernel module.</li>
+        <li><a href="#daemon">A userspace daemon</a>.
+        This handles tasks like DNS queries on behalf of the kernel module.</li>
+        <li>A test <a href="#test">client</a>.</li>
+    </ol>
+    <a name="kernel">
+    <h2>Kernel modifications</h2>
+    </a>
+    This assumes that you already know how to
+    <a href="../dream.html">compile and run a modified kernel</a> on your
+    development phone, including how to get the Wi-Fi driver working with your
+    modified kernel.
+    <p>
+    I don't describe how to get the prototype running on the emulator, because
+    the emulator "machine" doesn't support IPv6.  It's possible to run an
+    IPv6-enabled kernel on the emulator, but it'll never receive IPv6 packets
+    as a result of the emulator's lack of IPv6 support.  It may be useful to
+    develop and test on the emulator, using IPv4 only, using similar steps,
+    but how to do so I leave up to you.
+    <p>
+    First off, you're going to have to apply the patches for version 2.6.25
+    of the kernel.  Assuming you're in the top-level kernel source tree for
+    the dream phone, /Volumes/android/kernel-msm/msm, and the kernel patches
+    are in ~/patches/kernel,
+<pre>
+$ git am ~/patches/kernel/2.6.25/*
+</pre>
+    Next apply the common kernel patches:
+<pre>
+$ git am ~/patches/kernel/common/*
+</pre>
+    Next apply the patches that allow the namestack directory to be built.
+<pre>
+$ git am ~/patches/kernel/android/2.6.25/*
+</pre>
+    Finally, apply the patches that actually comprise the name-oriented stack:
+<pre>
+$ git am ~/patches/kernel/android/*
+</pre>
+    Now the kernel source is ready to be built.  Edit the .config file to add
+    the line:
+<pre>
+CONFIG_NAMESTACK=y
+</pre>
+    and build the kernel with:
+<pre>
+$ ARCH=arm CROSS_COMPILE=arm-eabi- make
+</pre>
+    If all is well, you'll get a new kernel in arch/arm/boot/zImage.  Combine
+    it with a ramdisk to produce a new boot image like you did before:
+<pre>
+$ mkbootimg --kernel arch/arm/boot/zImage \
+  --ramdisk /path/to/boot.img-ramdisk.gz --cmdline 'no_console_suspend=1 console=null' -o boot-2.6.25-name.img
+</pre>
+    I gave this boot image a different name than the old one just to keep
+    them separate.
+    <p>
+    You'll also <a href="../dream.html#wlan">need to rebuild and install the
+    Wi-Fi driver on the phone</a> in the same way you did before.
+    <p>
+    Finally, reboot the phone, holding down the camera and power buttons when
+    it starts up again to boot it in fastboot mode, and use the fastboot tool
+    to boot your new image:
+<pre>
+$ fastboot boot boot-2.6.25-name.img
+</pre>
+    If your phone starts and you're able to use the Wi-Fi interface with it,
+    your kernel is now ready to run the prototype applications.
+    <a name="daemon">
+    <h2>Building and running the daemon</h2>
+    </a>
+    In order to build the daemon, you'll need to have a copy of both the
+    android SDK and the android NDK installed.  You'll also need to have
+    ant installed.  You can install this on the Mac with:
+    <pre>
+$ sudo port install apache-ant
+    </pre>
+    and on Ubuntu with apt-get, or Fedora with yum.
+    <p>
+    Once both the SDK and NDK are installed, create a directory to store the
+    Java portion of the daemon.  Change to the NDK directory, and create
+    a subdirectory named apps/namestackd, and apply the patches to create
+    the application.  You'll recognize this pattern:
+<pre>
+$ mkdir apps/namestackd
+$ cd apps/namestackd
+$ git init
+$ touch .gitignore
+$ git add .gitignore
+$ git commit .gitignore
+$ git tag origin
+$ git am ~/patches/android/namestackd/*
+</pre>
+    The first patch creates a fairly large directory structure and a lot of
+    files, but it's all boilerplate.  You could also have created the same
+    files yourself using the android tool that's in the SDK by running:
+    <pre>
+$ &lt;sdk&gt;/tools/android create project --target 1 \
+   --path &lt;ndk&gt;/apps/namestackd/project --activity namestackd \
+   --package com.ericsson.namestackd
+    </pre>
+    Where &lt;sdk&gt; is the location of your android SDK, and &lt;ndk&gt; is
+    the locaion of your android NDK.
+    <p>
+    The second patch adds the Java portion of the implementation, which is
+    pretty small.  The bulk of the code is in the C source, which is shared
+    with the Linux prototype.  You'll make that next.
+    <p>
+    Change back to the NDK directory, make the directory for the daemon's C
+    source, and apply the patches that comprise the daemon.  You'll need to
+    create a subdirectory of the ndk's sources directory named namestackd,
+    initialize git in it, and apply the patches.  Here's the familiar pattern
+    again:
+<pre>
+$ mkdir sources/namestackd
+$ cd sources/namestackd
+$ git init
+$ touch .gitignore
+$ git add .gitignore
+$ git commit .gitignore
+$ git tag origin
+$ git am ~/patches/namestackd/*
+</pre>
+    Now make the shared library for the daemon:
+    <pre>
+$ make APP=namestackd
+    </pre>
+    Then change to the app's project directory, and use ant to build it:
+    <pre>
+$ cd apps/namestackd/project
+$ ant debug
+    </pre>
+    If everything went well, you should see a couple lines like the following
+    at the end of the output:
+<pre>
+BUILD SUCCESSFUL
+Total time: 3 seconds
+</pre>
+    Then install the daemon on the phone using:
+    <pre>
+$ adb install &lt;ndk&gt;/apps/namestackd/project/bin/namestackd-debug.apk
+    </pre>
+
+    <a name="test">
+    <h2>Building and running the test client</h2>
+    </a>
+    For the time being, I've only implemented a client for the android phone.
+    Thus, in order to test it, you'll want to have a server running on the
+    <a href="../linux/index.html">Linux implementation</a> to test against.
+    <p>
+    Again, change to the NDK directory, and create a directory for the Java
+    portion of the client, initialize git in it, and apply the patches that
+    create it:
+<pre>
+$ mkdir apps/NameStackClient
+$ cd apps/NameStackClient
+$ git init
+$ touch .gitignore
+$ git add .gitignore
+$ git commit .gitignore
+$ git tag origin
+$ git am ~/patches/android/NameStackClient/app/*
+</pre>
+    Again, the first commit is just boilerplate, which you could have created
+    using:
+    <pre>
+$ &lt;sdk&gt;/tools/android create project --target 1 \
+   --path &lt;ndk&gt;/apps/NameStackClient/project \
+   --activity NameStackClient --package com.ericsson.namestack
+    </pre>
+    <p>
+    Change back to the NDK directory, and make the directory that contains
+    the shared library for the client:
+<pre>
+$ mkdir sources/NameStackClient
+$ cd sources/NameStackClient
+$ git init
+$ touch .gitignore
+$ git add .gitignore
+$ git commit .gitignore
+$ git tag origin
+$ git am ~/patches/android/NameStackClient/lib/*
+</pre>
+    Then change back to the NDK directory, and build the shared library for
+    the client:
+    <pre>
+$ cd ../..
+$ make APP=NameStackClient
+    </pre>
+    Change to the app's project directory, and use ant to build it:
+    <pre>
+$ cd apps/NameStackClient/project
+$ ant debug
+    </pre>
+    Then install the client on the phone using:
+    <pre>
+$ adb install &lt;ndk&gt;/apps/NameStackClient/project/bin/NameStackClient-debug.apk
+    </pre>
+    You should now see a new application on the phone, NameStackClient:
+    <br>
+    <img src="apps.png">
+    <br>
+    (It's shown here on the emulator, just so I can show screenshots.)
+    <p>
+    Clicking on the application should show the following screen:
+    <br>
+    <img src="client.png">
+    <br>
+    Setting the source name is optional.  The destination name is one that
+    should be resolvable by the phone.  Since the prototype currently doesn't
+    do DNS updates, this is a challenge, which you can work around in one of
+    two ways:
+    <ol>
+        <li>Use a canonical name for the server.  This requires you to know
+        the IP address (IPv4 or IPv6) of the server, and for the server to
+        be started up listening on the canonical address rather than with
+        no suffix.
+        <p>
+        So, for example, if the IPv6 address of the server is
+        fe80::a00:27ff:fe00:b260, and you want to start the server up to
+        listen to name test on port 5000, start it up as follows:
+        <pre>
+$ ./namestackserver -p 5000 test.\\[xfe800000000000000a0027fffe00b260].ip6.arpa.
+        </pre>
+        Then, on the client, use the same name as the destination name on the
+        android application:
+        <pre>
+test.\[xfe800000000000000a0027fffe00b260].ip6.arpa.
+        </pre>
+        Note you don't need the double backslash on the android client, since
+        you're not interacting with a shell.
+        <p>
+        Similarly, if the IPv4 address of the server is 10.0.1.1, and you want
+        it to listen for name test on port 5000, start it up as follows:
+        <pre>
+$ ./namestackserver -p 5000 test.1.1.0.10.in-addr.arpa.
+        </pre>
+        Again, on the client, use the same name as the destination name on the
+        android application:
+        <pre>
+test.1.1.0.10.in-addr.arpa.
+        </pre>
+        </li>
+        <li>Modify <a href="hack.patch">this hack</a> to hardcode the IPv6
+        address of the server, and apply it to the daemon.  You'll need to
+        modify the hardcoded hack_address to match the address of the server.
+        After you apply the patch, you'll need to rebuild the daemon and
+        install it on the phone in order to use it.
+        </li>
+    </ol>
+    Also note that the client application is hardcoded to connect to port 5000,
+    mainly to keep the UI from being too messy.  Modify it to suit your needs.
+    <p>
+    Once your server is set up correctly, and you've typed its name into the
+    destination name field on the phone, click Connect.  You should see
+    messages about creating a socket and sending and receiving a message.
+    If instead you see an error about the address family not being supported:
+    <br>
+    <img src="eafnosupport.png">
+    <br>
+    You're not running <a href="#kernel">the modified kernel</a>.  Otherwise,
+    congratulations!  You've successfully built and run the prototype Linux
+    and android implementations.
+    <p>
+    Back to <a href="../dream.html">5.3. Compiling and running the android
+    kernel on the development phone</a>.
+    <br>
+    <a href="../index.html">Top</a>
+</body>
+</html>

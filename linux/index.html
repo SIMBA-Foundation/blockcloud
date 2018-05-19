@@ -1,0 +1,246 @@
+<html>
+<head><title>4. Compiling and running the prototype on a standard Linux distribution</title></head>
+<body>
+    <h2>4. Compiling and running the prototype on a standard Linux distribution</h2>
+    The prototype for a standard Linux distribution consists of several pieces:
+    <ul>
+        <li>A modified Linux kernel.  The modifications are small, but are
+        necessary to load the kernel module.</li>
+        <li>A kernel module that implements the new address family,
+        AF_NAME.</li>
+        <li>A userspace daemon.  This handles tasks like DNS queries on behalf
+        of the kernel module.</li>
+        <li>A test client and server.</li>
+    </ul>
+    <a name="kernel">
+    <h2>4.1. Modifying and running the kernel</h2>
+    </a>
+    The prototype introduces a new protocol family, PF_NAME, to the kernel.
+    The kernel has a fixed-size array of protocol families, so it's necessary
+    to extend this array and recompile the kernel in order to add the new
+    protocol family.  Unfortunately the size of the array changes from time
+    to time, so you'll need to apply a patch appropriate to your kernel version.
+    Change to the top-level directory of your kernel source.  Assuming the
+    patches for the prototype are in ~/patches, apply the version-specific
+    patches first.  For example, assuming you're running kernel version
+    2.6.29:
+<pre>
+$ git am ~/patches/kernel/2.6.29/*
+</pre>
+    I have versions for 2.6.25, 2.6.27, and 2.6.29.  2.6.28 also works, with
+    the 2.6.29 patch.  I haven't tried 2.6.26 or kernel versions newer than
+    2.6.29.
+    <p>
+    Next apply the common kernel changes:
+<pre>
+$ git am ~/patches/kernel/common/*
+</pre>
+    The main change these make increases the size of struct sockaddr_storage
+    to accomodate the DNS name that the name-oriented stack uses as a socket
+    address.
+    <p>
+    The remaining changes don't absolutely have to be in the kernel
+    headers, but they're more conveniently located in them since they're used
+    both by the kernel portion of the name oriented stack, and its user-space
+    daemon.
+    <p>
+    In section <a href="../linux.html">3. Compiling and running the Linux
+    kernel within a virtual machine</a>, you already learned how to configure,
+    compile, and run your own kernel.  Now that you've modified the kernel to
+    be able to support the name-oriented stack, you'll want to recompile it,
+    install it, and run it.
+    <a name="module">
+    <h2>4.2. Building and running the kernel module</h2>
+    </a>
+    The kernel module source is also a series of patches.  You can apply them
+    in the way suggested in <a href="../git.html">section 2. Working with
+    git</a>:
+    <pre>
+$ mkdir namestack
+$ cd namestack
+$ git init
+$ touch .gitignore
+$ git commit .gitignore
+$ git tag origin
+    </pre>
+    Then apply the patches to the current directory.  For example, if the
+    patches are in ~/patches/namestack, apply them with:
+    <pre>
+$ git am ~/patches/namestack/*
+    </pre>
+    The kernel module expects the <a href="#kernel">modified kernel source</a>
+    is available in a sibling directory named linux-2.6.27.  If it's in a
+    different location, you'll have to modify the Makefile.  It contains
+    the following line:
+    <pre>
+KERN_BUILD := ../linux-2.6.27
+    </pre>
+    Modify it to the location of the kernel you're building against.
+    <em>Reminder: the kernel must have the <a href="#kernel">patches</a>
+    applied.</em>
+    <p>
+    Once you've applied the patches that define the name-oriented stack module,
+    you can build the module by typing make.  Assuming all goes well, you'll
+    end up with a module name namestack.ko.  You can load the module by typing:
+    <pre>
+$ sudo /sbin/insmod namestack.ko
+    </pre>
+    If you look at /var/log/messages, you should see a line similar to the
+    following:
+    <pre>
+Aug 28 05:19:31 juan-vubuntu kernel: [ 4615.804707] name-oriented stack module loading
+    </pre>
+    If you see an error loading the module, you probably aren't running the
+    <a href="#kernel">modified kernel</a>.
+    <a name="daemon">
+    <h2>4.3. Building and running the daemon</h2>
+    </a>
+    The daemon is also available as, you guessed it, a series of patches.
+    Create a directory named namestackd for the daemon:
+    <pre>
+$ mkdir namestackd
+$ cd namestackd
+$ git init
+$ touch .gitignore
+$ git commit .gitignore
+$ git tag origin
+    </pre>
+    And assuming the patches are in ~/patches/namestackd, apply them:
+    <pre>
+$ git am ~/patches/namestackd/*
+    </pre>
+    Once you've got a copy of the daemon's source, build it using make, and run
+    it.  It doesn't need any special privileges for now, but it won't do
+    anything unless the <a href="#kernel">modified kernel</a> is running and
+    the <a href="#module">kernel module</a> is loaded.
+
+    <a name="test">
+    <h2>4.4. Building and running the test client and server</h2>
+    </a>
+    The client and server are just a single C file and Makefile each.  The
+    <a href="client">source for the client</a> and the <a href="server">source
+    for the server</a> is included as part of this distribution.
+    <p>
+    Each expects the kernel to be available in a sibling directory named
+    linux-2.6.27.  If the location is different, modify the Makefile
+    accordingly.
+    <p>
+    Building them is simple:  just type 'make' in each one's source directory.
+    I'll describe running the server first, then the client.
+    <h3>4.4.1. Running the server</h3>
+    In order to run the server, you'll need to pick a name the server listens
+    on.  (This is similar to specifying the port to listen on.)  You'll also
+    need to provide a port:  one of the limitations I mentioned earlier is that
+    the client must know the server's port, even if it knows the server's
+    name.
+    <p>
+    In general, a name is a DNS name.  Special forms of names are supported
+    that allow the server to specify that it only wants to listen for
+    connections from the local machine, or to specify the IP address on which
+    it wants to listen.  Because one of the unimplemented features is domain
+    name registration, we'll have to use one of these special forms of name
+    for now.
+    <p>
+    If you want to test connections on a single machine, the domain to use is
+    .localhost.  So, for example, to listen to the name server on port 5000
+    on the local machine, run:
+    <pre>
+$ ./namestackserver -p 5000 server.localhost.
+    </pre>
+    Note the terminating dot:  without it the name-oriented stack module
+    assumes the name should be registered in the default domain.
+    <p>
+    If all goes well, you should see output like the following on the server:
+    <pre>
+creating a socket with domain = 35, type = 1, protocol = 0
+got a socket!
+binding to server.localhost.:5000
+bind succeeded!
+    </pre>
+    If you see some error, you're likely not running the
+    <a href="#kernel">modified kernel</a>, or the <a href="#module">kernel
+    module</a> isn't loaded correctly.  Also, the "domain = " value should
+    reflect the definition of AF_NAME in the kernel you're running.  It may
+    or may not be 35.
+    <p>
+    If you want to accept connections from another machine, this is possible
+    by specifying the IP address of one of the machine's interfaces using
+    the canonical form of the name.  You can either specify an IPv4 address
+    or an IPv6 address, although specifying an IPv4 address means the name
+    options are not transferred, which isn't very interesting.  It can be
+    useful to make sure everything's built and running correctly, however.
+    <p>
+    If you want to listen on IPv4 address 10.0.0.1, for example, you'd use
+    the name 1.0.0.10.in-addr.arpa.
+    <em>Note: this domain isn't intended to be used forever, we just haven't
+        specified the final one yet.</em>
+    <p>
+    So, listening for the name test on the IP address 10.0.0.1, port 5000
+    would be done with the following command:
+    <pre>
+$ ./namestackserver -p 5000 server.1.0.0.10.in-addr.arpa.
+    </pre>
+    Listening on an IPv6 address is also possible, although the syntax is a
+    little inconvenient to type.  If your IPv6 address is
+    fc00:abcd:1234:5678:0000:0800:2700:b260, you'd use the canonical domain
+    \[xfc00abcd12345678000008002700b260].ip6.arpa.  So listening for the name
+    server on this domain, port 5000 would be done with the following command:
+    <pre>
+$ ./namestackserver -p 5000 server.\\[xfc00abcd12345678000008002700b260].ip6.arpa.
+    </pre>
+    Note the double-backslash:  this escapes the backslash character in the
+    shell.
+    <h3>4.4.2. Running the client</h3>
+    Running the client is similar.  You'll need to provide the port to connect
+    to, and the name to connect to.  For example, if your server is listening
+    on port 5000 and the name server.localhost., run the client with:
+    <pre>
+$ ./namestackclient -p 5000 server.localhost.
+    </pre>
+    As before, the name needs a terminating dot.
+    <p>
+    If all goes well, you should see something like the following on the
+    server:
+    <pre>
+connection accepted from \[x00000000000000000000000000000001/128].ip6.arpa.
+wrote hello message
+got a reply: greetings
+    </pre>
+    The "connection accepted from" line tells you the name of the client that
+    connected.  Here, it's gotten a connection from the IPv6 loopback address,
+    ::1.  If you connect with a client on a different machine, you should
+    see the canonical form of the address from which they are connecting
+    instead.
+    <p>
+    The client should give similar output, something like:
+    <pre>
+creating a socket with domain = 35, type = 1, protocol = 0
+got a socket!
+connecting to server.localhost.:5000:
+connect succeeded!
+got a message: hello
+wrote a reply
+    </pre>
+    <p>
+    The client also allows you to specify a name to use.  For example, if
+    you want to connect using the name client.localhost., run the client
+    with the command:
+    <pre>
+$ ./namestackclient -p 5000 -s client.localhost. server.localhost.
+    </pre>
+    Then, instead of the server reporting a canonical name for the client,
+    you should see output like:
+    <pre>
+connection accepted from client.localhost.
+wrote hello message
+got a reply: greetings
+    </pre>
+    Back to <a href="../linux.html">3. Compiling and running the Linux kernel
+    within a virtual machine</a>.
+    <br>
+    Continue to <a href="../android.html">5. Getting and compiling the Linux
+    kernel for the android phone</a>.
+    <br>
+    <a href="../index.html">Top</a>
+</body>
+</html>

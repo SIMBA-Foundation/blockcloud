@@ -1,0 +1,274 @@
+From 758151591215727d426c8c0a67adad8b4de5ec91 Mon Sep 17 00:00:00 2001
+From: Juan Lang <juan.lang@ericsson.com>
+Date: Thu, 17 Sep 2009 15:16:31 -0700
+Subject: [PATCH] On android, return a hardcoded address for every name query (hack for demo)
+
+---
+ daemon.c |  230 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 files changed, 230 insertions(+), 0 deletions(-)
+
+diff --git a/daemon.c b/daemon.c
+index 9d0e390..204632c 100644
+--- a/daemon.c
++++ b/daemon.c
+@@ -35,6 +35,9 @@
+ #ifndef T_A
+ #define T_A 1
+ #endif
++#ifndef T_CNAME
++#define T_CNAME 5
++#endif
+ #ifndef T_AAAA
+ #define T_AAAA 28
+ #endif
+@@ -121,6 +124,219 @@ static void print_aaaa(const u_char *ptr, uint16_t rdlength,
+     }
+ }
+ 
++#ifdef ANDROID
++/* Encodes a name in DNS (RFC 1035) format into buf.
++ * If buf is NULL, returns the size of the encoded name, that is, how big buf
++ * should be.
++ * Otherwise returns the size of the encoded name if successful, or -1 if buf
++ * is too small.
++ */
++static int rfc1035_encode_name(const char *name, u_char *buf, size_t size)
++{
++	int fully_qualified = *(name + strlen(name) - 1) == '.';
++	u_char component_len;
++	int total_len = 0;
++	u_char *dst = buf;
++	const char *dot;
++
++	do {
++		dot = strchr(name, '.');
++		if (dot) {
++			component_len = dot - name;
++			total_len += component_len + 1;
++			if (buf) {
++				if (size - (dst - buf) < component_len + 1)
++					goto overrun;
++				*dst++ = component_len;
++				memcpy(dst, name, component_len);
++				dst += component_len;
++			}
++			name = dot + 1;
++		}
++	} while (dot);
++	/* If the name is not fully qualified, the loop doesn't include the
++	 * final name component, so include it now
++	 */
++	if (!fully_qualified) {
++		component_len = strlen(name);
++		total_len += component_len + 1;
++		if (buf) {
++			if (size - (dst - buf) < component_len + 1)
++				goto overrun;
++			*dst++ = component_len;
++			memcpy(dst, name, component_len);
++			dst += component_len;
++		}
++	}
++	/* 0-length terminator */
++	total_len++;
++	if (buf) {
++		if (size - (dst - buf) < 1) goto overrun;
++		*dst++ = 0;
++	}
++	return total_len;
++
++overrun:
++	return -1;
++}
++
++/* Constructs a fake DNS server response for name, with a hardcoded IPv6
++ * address.
++ * Returns the size of the encoded response if successful, -1 if buf is too
++ * small.
++ */
++static int construct_hack_response(const char *name, u_char *buf, size_t size)
++{
++	static const u_char hack_address[] =
++	{ 0xfe,0x80,0x00,0x00,0x00,0x00,0x00,0x00,
++	  0x0a,0x00,0x27,0xff,0xfe,0x00,0xb2,0x60 };
++	static const u_char hack_suffix[] =
++        { 8,'e','r','i','c','s','s','o','n',
++          3,'c','o','m',
++          0 };
++	u_char *dst = buf, len;
++	char *dot;
++	const char *orig_name = name;
++	int fully_qualified = *(name + strlen(name) - 1) == '.', namelen;
++	u_short sval;
++	u_int lval;
++
++	LOGI("constructing hack response for %s\n", name);
++
++	/* HEADER */
++	/* 12 = sizeof(HEADER): 2 for transaction id + 2 for flags +
++	 * 2 for qdcount + 2 for ancount + 2 for nscount + 2 for arcount
++	 */
++	if (size <= 12) goto overrun;
++	sval = htons(1);
++	memcpy(dst, &sval, sizeof(sval)); /* transaction id */
++	dst += sizeof(sval);
++	*dst++ = 0x81; /* recursion desired, response flag */
++	*dst++ = 0x80; /* response code */
++	sval = htons(1);
++	memcpy(dst, &sval, sizeof(sval)); /* questions (1) */
++	dst += sizeof(sval);
++	if (!fully_qualified) {
++		/* a non-fully-qualified name requires a CNAME answer as well
++		 * as an address answer.
++		 */
++		sval = htons(2);
++	}
++	memcpy(dst, &sval, sizeof(sval)); /* answer RRs */
++	dst += sizeof(sval);
++	sval = 0;
++	memcpy(dst, &sval, sizeof(sval)); /* authority RRs (0) */
++	dst += sizeof(sval);
++	memcpy(dst, &sval, sizeof(sval)); /* additional RRs (0) */
++	dst += sizeof(sval);
++
++	/* Query */
++	namelen = rfc1035_encode_name(name, dst, size - (dst - buf));
++	if (namelen < 0) goto overrun;
++	dst += namelen;
++	/* 4 = 2 for type + 2 for class */
++	if (size - (dst - buf) < 4) goto overrun;
++	sval = htons(T_AAAA);
++	memcpy(dst, &sval, sizeof(sval)); /* type */
++	dst += sizeof(sval);
++	sval = htons(C_IN);
++	memcpy(dst, &sval, sizeof(sval)); /* class */
++	dst += sizeof(u_short);
++
++	/* Answers. */
++	if (!fully_qualified) {
++		u_short rdlength;
++
++		/* For a non-fully-qualified name, add a CNAME RR indicating
++		 * the fully-qualified name.
++		 * 12 = 2 for name (1 for pointer, 1 for offset) + 2 for type +
++		 * 2 for class + 4 for TTL + 2 for rdlength
++		 */
++		if (size - (dst - buf) < 12) goto overrun;
++		*dst++ = 0xc0; /* pointer */
++		*dst++ = 12; /* offset 12, beginning of name in query */
++		sval = htons(T_CNAME);
++		memcpy(dst, &sval, sizeof(sval)); /* type */
++		dst += sizeof(sval);
++		sval = htons(C_IN);
++		memcpy(dst, &sval, sizeof(sval)); /* class */
++		dst += sizeof(sval);
++		lval = htonl(500);
++		memcpy(dst, &lval, sizeof(lval)); /* TTL */
++		dst += sizeof(lval);
++		/* The rdlength is the name of the encoded fully-qualified
++		 * name.  The fully qualified name consists of the original
++		 * name concatenated with '.' and the name suffix.
++		 * Conveniently, the encoded form of a DNS name is exactly as
++		 * long as the unencoded form, plus one length byte (assuming
++		 * only ASCII characters in the name.)
++		 */
++		rdlength = strlen(name) + 1 + sizeof(hack_suffix);
++		/* 2 for rdlength */
++		if (size - (dst - buf) < 2 + rdlength) goto overrun;
++		sval = htons(rdlength);
++		memcpy(dst, &sval, sizeof(sval)); /* rdlength */
++		dst += sizeof(u_short);
++		namelen = rfc1035_encode_name(name, dst, size - (dst - buf));
++		/* We already checked the length, so namelen is not negative.
++		 * We back up one byte to overwrite the 0-length terminator
++		 * with the encoded suffix.
++		 */
++		dst += namelen - 1;
++		memcpy(dst, hack_suffix, sizeof(hack_suffix));
++		dst += sizeof(hack_suffix);
++	}
++	/* Address (AAAA) RR.
++	 * If the name is fully qualified, encode it as a pointer to the name
++	 * in the query.  Otherwise qualify it with the hardcoded suffix
++	 * (so the server will respect it.)
++         */
++	if (fully_qualified) {
++		/* 2 = 1 for pointer, 1 for offset */
++		if (size - (dst - buf) < 2) goto overrun;
++		*dst++ = 0xc0; /* pointer */
++		*dst++ = 12; /* offset 12, beginning of name in query */
++	}
++	else {
++		/* Encode the fully-qualified name in the address RR. */
++		namelen = rfc1035_encode_name(name, dst, size - (dst - buf));
++		if (namelen < 0) goto overrun;
++		/* Like in the rdata portion of the CNAME answer, we back up
++		 * one byte to overwrite the 0-length terminator with the
++		 * encoded suffix.
++		 */
++		dst += namelen - 1;
++		/* Append the hardcoded suffix. */
++		if (size - (dst - buf) < sizeof(hack_suffix)) goto overrun;
++		memcpy(dst, hack_suffix, sizeof(hack_suffix));
++		dst += sizeof(hack_suffix);
++	}
++	/* 10 = 2 for type + 2 for class + 4 for TTL + 2 for rdlength */
++	if (size - (dst - buf) < 10 + sizeof(struct in6_addr)) goto overrun;
++	sval = htons(T_AAAA);
++	memcpy(dst, &sval, sizeof(sval)); /* type */
++	dst += sizeof(sval);
++	sval = htons(C_IN);
++	memcpy(dst, &sval, sizeof(sval)); /* class */
++	dst += sizeof(sval);
++	lval = htonl(500);
++	memcpy(dst, &lval, sizeof(lval)); /* TTL */
++	dst += sizeof(lval);
++	sval = htons(sizeof(hack_address));
++	memcpy(dst, &sval, sizeof(sval)); /* rdlength */
++	dst += sizeof(sval);
++	memcpy(dst, hack_address, sizeof(hack_address)); /* rdata */
++	dst += sizeof(hack_address);
++
++	len = dst - buf;
++	return len;
++
++overrun:
++	LOGW("size %d too short\n", size);
++	return -1;
++}
++#endif
++
+ struct query_data
+ {
+ 	unsigned int seq;
+@@ -143,6 +359,19 @@ static void *query_thread(void *arg)
+ 		return NULL;
+ 	}
+ 	buflen = PACKETSZ;
++#ifdef ANDROID
++	len = construct_hack_response(data->name, buf, buflen);
++	if (len >= 0)
++	{
++		found_response = !find_answer_of_type(buf, len, T_AAAA, 0,
++						      &rdlength, &rdata);
++		if (found_response)
++		{
++			LOGI("%s", "constructed hack IPv6 address\n");
++			print_aaaa(rdata, rdlength, buf, len);
++		}
++	}
++#else
+ 	len = res_query(data->name, C_IN, T_AAAA, buf, buflen);
+ 	if (len >= 0)
+ 	{
+@@ -156,6 +385,7 @@ static void *query_thread(void *arg)
+ 			LOGI("found a valid IPv6 address %s\n", addrbuf);
+ 		}
+ 	}
++#endif
+ 	if (!found_response)
+ 	{
+ 		len = res_query(data->name, C_IN, T_A, buf, buflen);
+-- 
+1.6.3.2
+
