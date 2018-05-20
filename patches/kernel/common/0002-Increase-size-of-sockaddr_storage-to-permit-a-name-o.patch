@@ -1,0 +1,28 @@
+From a9b6695158b9490f4054958afd239fc21b726b5a Mon Sep 17 00:00:00 2001
+From: Juan Lang <juan.lang@ericsson.com>
+Date: Thu, 10 Sep 2009 13:38:53 -0700
+Subject: [PATCH 2/4] Increase size of sockaddr_storage to permit a name-oriented stack address
+
+---
+ include/linux/socket.h |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/include/linux/socket.h b/include/linux/socket.h
+index 5f280e7..6cdfa96 100644
+--- a/include/linux/socket.h
++++ b/include/linux/socket.h
+@@ -2,9 +2,9 @@
+ #define _LINUX_SOCKET_H
+ 
+ /*
+- * Desired design of maximum size and alignment (see RFC2553)
++ * Desired design of maximum size and alignment (see RFC1034)
+  */
+-#define _K_SS_MAXSIZE	128	/* Implementation specific max size */
++#define _K_SS_MAXSIZE	(254 + 2 * sizeof(unsigned short))	/* Implementation specific max size */
+ #define _K_SS_ALIGNSIZE	(__alignof__ (struct sockaddr *))
+ 				/* Implementation specific desired alignment */
+ 
+-- 
+1.6.3.2
+

@@ -1,0 +1,24 @@
+From 291b236ba62f798cb0361fbb2dcf87908a7d24b9 Mon Sep 17 00:00:00 2001
+From: Juan Lang <juan.lang@ericsson.com>
+Date: Thu, 10 Sep 2009 13:38:22 -0700
+Subject: [PATCH 1/4] Add protocol for name-oriented stack kernel messages
+
+---
+ include/linux/netlink.h |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/include/linux/netlink.h b/include/linux/netlink.h
+index 51b09a1..8718aec 100644
+--- a/include/linux/netlink.h
++++ b/include/linux/netlink.h
+@@ -24,6 +24,7 @@
+ /* leave room for NETLINK_DM (DM Events) */
+ #define NETLINK_SCSITRANSPORT	18	/* SCSI Transports */
+ #define NETLINK_ECRYPTFS	19
++#define NETLINK_NAME_ORIENTED_STACK	20
+ 
+ #define MAX_LINKS 32		
+ 
+-- 
+1.6.3.2
+

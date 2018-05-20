@@ -1,0 +1,45 @@
+From 150b7215a41f63b83674b80552a07541f9456f26 Mon Sep 17 00:00:00 2001
+From: Juan Lang <juan.lang@ericsson.com>
+Date: Thu, 10 Sep 2009 13:39:06 -0700
+Subject: [PATCH 3/4] Add kernel header for the name-oriented stack architecture
+
+---
+ include/linux/inname.h |   26 ++++++++++++++++++++++++++
+ 1 files changed, 26 insertions(+), 0 deletions(-)
+ create mode 100644 include/linux/inname.h
+
+diff --git a/include/linux/inname.h b/include/linux/inname.h
+new file mode 100644
+index 0000000..e337d79
+--- /dev/null
++++ b/include/linux/inname.h
+@@ -0,0 +1,26 @@
++/*
++ * Types and definitions for the Name-Oriented Stack Architecture
++ * implementation.
++ *
++ * Authors:
++ * Juan Lang <juan.lang@ericsson.com>
++ */
++#ifndef LINUX_INNAME_H
++#define LINUX_INNAME_H
++
++/* According to RFC1034, the maximum number of octets of a transmitted name is
++ * 255.  Assuming at least one preceding length octet and one terminating
++ * length octet of 0, this implies the maximum text length of domain name is
++ * 253 bytes, or 254 bytes with a NULL terminator.
++ */
++struct name_addr {
++    char name[254];
++};
++
++struct sockaddr_name {
++    unsigned short int sname_family; /* AF_NAME */
++    __be16             sname_port;   /* Transport layer port # */
++    struct name_addr   sname_addr;
++};
++
++#endif /* LINUX_INNAME_H */
+-- 
+1.6.3.2
+

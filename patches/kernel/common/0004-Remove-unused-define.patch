@@ -1,0 +1,32 @@
+From ac63ed3545ea17df582e428bf35ab8b8dbb35a80 Mon Sep 17 00:00:00 2001
+From: Juan Lang <juan.lang@ericsson.com>
+Date: Mon, 14 Sep 2009 11:35:24 -0700
+Subject: [PATCH 4/4] Remove unused define
+
+---
+ net/socket.c |    9 ---------
+ 1 files changed, 0 insertions(+), 9 deletions(-)
+
+diff --git a/net/socket.c b/net/socket.c
+index 06988a3..5619844 100644
+--- a/net/socket.c
++++ b/net/socket.c
+@@ -165,15 +165,6 @@ static DEFINE_PER_CPU(int, sockets_in_use) = 0;
+  * divide and look after the messy bits.
+  */
+ 
+-#define MAX_SOCK_ADDR	128		/* 108 for Unix domain -
+-					   16 for IP, 16 for IPX,
+-					   24 for IPv6,
+-					   about 80 for AX.25
+-					   must be at least one bigger than
+-					   the AF_UNIX size (see net/unix/af_unix.c
+-					   :unix_mkname()).
+-					 */
+-
+ /**
+  *	move_addr_to_kernel	-	copy a socket address into kernel space
+  *	@uaddr: Address in user space
+-- 
+1.6.3.2
+
