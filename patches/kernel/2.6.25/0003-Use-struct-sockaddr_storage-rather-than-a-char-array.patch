@@ -1,0 +1,338 @@
+From 227b94f2b940190f276409d9f6a7cc58e48dda01 Mon Sep 17 00:00:00 2001
+From: Juan Lang <juan.lang@ericsson.com>
+Date: Mon, 14 Sep 2009 11:33:13 -0700
+Subject: [PATCH 3/7] Use struct sockaddr_storage rather than a char array when a struct sockaddr_storage is the intended type
+
+---
+ include/linux/socket.h |    6 ++--
+ include/net/compat.h   |    2 +-
+ net/compat.c           |    2 +-
+ net/core/iovec.c       |    2 +-
+ net/socket.c           |   81 ++++++++++++++++++++++++++---------------------
+ 5 files changed, 51 insertions(+), 42 deletions(-)
+
+diff --git a/include/linux/socket.h b/include/linux/socket.h
+index 1f34617..93ef5bc 100644
+--- a/include/linux/socket.h
++++ b/include/linux/socket.h
+@@ -308,10 +308,10 @@ extern int csum_partial_copy_fromiovecend(unsigned char *kdata,
+ 					  int offset, 
+ 					  unsigned int len, __wsum *csump);
+ 
+-extern int verify_iovec(struct msghdr *m, struct iovec *iov, char *address, int mode);
++extern int verify_iovec(struct msghdr *m, struct iovec *iov, struct sockaddr *address, int mode);
+ extern int memcpy_toiovec(struct iovec *v, unsigned char *kdata, int len);
+-extern int move_addr_to_user(void *kaddr, int klen, void __user *uaddr, int __user *ulen);
+-extern int move_addr_to_kernel(void __user *uaddr, int ulen, void *kaddr);
++extern int move_addr_to_user(struct sockaddr *kaddr, int klen, void __user *uaddr, int __user *ulen);
++extern int move_addr_to_kernel(void __user *uaddr, int ulen, struct sockaddr *kaddr);
+ extern int put_cmsg(struct msghdr*, int level, int type, int len, void *data);
+ 
+ #endif
+diff --git a/include/net/compat.h b/include/net/compat.h
+index 406db24..cc398fe 100644
+--- a/include/net/compat.h
++++ b/include/net/compat.h
+@@ -32,7 +32,7 @@ extern int compat_sock_get_timestampns(struct sock *, struct timespec __user *);
+ #endif /* defined(CONFIG_COMPAT) */
+ 
+ extern int get_compat_msghdr(struct msghdr *, struct compat_msghdr __user *);
+-extern int verify_compat_iovec(struct msghdr *, struct iovec *, char *, int);
++extern int verify_compat_iovec(struct msghdr *, struct iovec *, struct sockaddr *, int);
+ extern asmlinkage long compat_sys_sendmsg(int,struct compat_msghdr __user *,unsigned);
+ extern asmlinkage long compat_sys_recvmsg(int,struct compat_msghdr __user *,unsigned);
+ extern asmlinkage long compat_sys_getsockopt(int, int, int, char __user *, int __user *);
+diff --git a/net/compat.c b/net/compat.c
+index 80013fb..42d9492 100644
+--- a/net/compat.c
++++ b/net/compat.c
+@@ -73,7 +73,7 @@ int get_compat_msghdr(struct msghdr *kmsg, struct compat_msghdr __user *umsg)
+ 
+ /* I've named the args so it is easy to tell whose space the pointers are in. */
+ int verify_compat_iovec(struct msghdr *kern_msg, struct iovec *kern_iov,
+-		   char *kern_address, int mode)
++		   struct sockaddr *kern_address, int mode)
+ {
+ 	int tot_len;
+ 
+diff --git a/net/core/iovec.c b/net/core/iovec.c
+index 755c37f..4c9c012 100644
+--- a/net/core/iovec.c
++++ b/net/core/iovec.c
+@@ -36,7 +36,7 @@
+  *	in any case.
+  */
+ 
+-int verify_iovec(struct msghdr *m, struct iovec *iov, char *address, int mode)
++int verify_iovec(struct msghdr *m, struct iovec *iov, struct sockaddr *address, int mode)
+ {
+ 	int size, err, ct;
+ 
+diff --git a/net/socket.c b/net/socket.c
+index 9d3fbfb..c2aee0f 100644
+--- a/net/socket.c
++++ b/net/socket.c
+@@ -179,9 +179,9 @@ static DEFINE_PER_CPU(int, sockets_in_use) = 0;
+  *	invalid addresses -EFAULT is returned. On a success 0 is returned.
+  */
+ 
+-int move_addr_to_kernel(void __user *uaddr, int ulen, void *kaddr)
++int move_addr_to_kernel(void __user *uaddr, int ulen, struct sockaddr *kaddr)
+ {
+-	if (ulen < 0 || ulen > MAX_SOCK_ADDR)
++	if (ulen < 0 || ulen > sizeof(struct sockaddr_storage))
+ 		return -EINVAL;
+ 	if (ulen == 0)
+ 		return 0;
+@@ -207,7 +207,7 @@ int move_addr_to_kernel(void __user *uaddr, int ulen, void *kaddr)
+  *	specified. Zero is returned for a success.
+  */
+ 
+-int move_addr_to_user(void *kaddr, int klen, void __user *uaddr,
++int move_addr_to_user(struct sockaddr *kaddr, int klen, void __user *uaddr,
+ 		      int __user *ulen)
+ {
+ 	int err;
+@@ -218,7 +218,7 @@ int move_addr_to_user(void *kaddr, int klen, void __user *uaddr,
+ 		return err;
+ 	if (len > klen)
+ 		len = klen;
+-	if (len < 0 || len > MAX_SOCK_ADDR)
++	if (len < 0 || len > sizeof(struct sockaddr_storage))
+ 		return -EINVAL;
+ 	if (len) {
+ 		if (audit_sockaddr(klen, kaddr))
+@@ -1341,20 +1341,20 @@ out_fd:
+ asmlinkage long sys_bind(int fd, struct sockaddr __user *umyaddr, int addrlen)
+ {
+ 	struct socket *sock;
+-	char address[MAX_SOCK_ADDR];
++        struct sockaddr_storage address;
+ 	int err, fput_needed;
+ 
+ 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+ 	if (sock) {
+-		err = move_addr_to_kernel(umyaddr, addrlen, address);
++		err = move_addr_to_kernel(umyaddr, addrlen, (struct sockaddr *)&address);
+ 		if (err >= 0) {
+ 			err = security_socket_bind(sock,
+-						   (struct sockaddr *)address,
++						   (struct sockaddr *)&address,
+ 						   addrlen);
+ 			if (!err)
+ 				err = sock->ops->bind(sock,
+ 						      (struct sockaddr *)
+-						      address, addrlen);
++						      &address, addrlen);
+ 		}
+ 		fput_light(sock->file, fput_needed);
+ 	}
+@@ -1406,7 +1406,7 @@ asmlinkage long sys_accept(int fd, struct sockaddr __user *upeer_sockaddr,
+ 	struct socket *sock, *newsock;
+ 	struct file *newfile;
+ 	int err, len, newfd, fput_needed;
+-	char address[MAX_SOCK_ADDR];
++        struct sockaddr_storage address;
+ 
+ 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+ 	if (!sock)
+@@ -1445,13 +1445,13 @@ asmlinkage long sys_accept(int fd, struct sockaddr __user *upeer_sockaddr,
+ 		goto out_fd;
+ 
+ 	if (upeer_sockaddr) {
+-		if (newsock->ops->getname(newsock, (struct sockaddr *)address,
++		if (newsock->ops->getname(newsock, (struct sockaddr *)&address,
+ 					  &len, 2) < 0) {
+ 			err = -ECONNABORTED;
+ 			goto out_fd;
+ 		}
+-		err = move_addr_to_user(address, len, upeer_sockaddr,
+-					upeer_addrlen);
++		err = move_addr_to_user((struct sockaddr *)&address,
++					len, upeer_sockaddr, upeer_addrlen);
+ 		if (err < 0)
+ 			goto out_fd;
+ 	}
+@@ -1494,22 +1494,22 @@ asmlinkage long sys_connect(int fd, struct sockaddr __user *uservaddr,
+ 			    int addrlen)
+ {
+ 	struct socket *sock;
+-	char address[MAX_SOCK_ADDR];
++	struct sockaddr_storage address;
+ 	int err, fput_needed;
+ 
+ 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+ 	if (!sock)
+ 		goto out;
+-	err = move_addr_to_kernel(uservaddr, addrlen, address);
++	err = move_addr_to_kernel(uservaddr, addrlen, (struct sockaddr *)&address);
+ 	if (err < 0)
+ 		goto out_put;
+ 
+ 	err =
+-	    security_socket_connect(sock, (struct sockaddr *)address, addrlen);
++	    security_socket_connect(sock, (struct sockaddr *)&address, addrlen);
+ 	if (err)
+ 		goto out_put;
+ 
+-	err = sock->ops->connect(sock, (struct sockaddr *)address, addrlen,
++	err = sock->ops->connect(sock, (struct sockaddr *)&address, addrlen,
+ 				 sock->file->f_flags);
+ out_put:
+ 	fput_light(sock->file, fput_needed);
+@@ -1526,7 +1526,7 @@ asmlinkage long sys_getsockname(int fd, struct sockaddr __user *usockaddr,
+ 				int __user *usockaddr_len)
+ {
+ 	struct socket *sock;
+-	char address[MAX_SOCK_ADDR];
++	struct sockaddr_storage address;
+ 	int len, err, fput_needed;
+ 
+ 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+@@ -1537,10 +1537,10 @@ asmlinkage long sys_getsockname(int fd, struct sockaddr __user *usockaddr,
+ 	if (err)
+ 		goto out_put;
+ 
+-	err = sock->ops->getname(sock, (struct sockaddr *)address, &len, 0);
++	err = sock->ops->getname(sock, (struct sockaddr *)&address, &len, 0);
+ 	if (err)
+ 		goto out_put;
+-	err = move_addr_to_user(address, len, usockaddr, usockaddr_len);
++	err = move_addr_to_user((struct sockaddr *)&address, len, usockaddr, usockaddr_len);
+ 
+ out_put:
+ 	fput_light(sock->file, fput_needed);
+@@ -1557,7 +1557,7 @@ asmlinkage long sys_getpeername(int fd, struct sockaddr __user *usockaddr,
+ 				int __user *usockaddr_len)
+ {
+ 	struct socket *sock;
+-	char address[MAX_SOCK_ADDR];
++	struct sockaddr_storage address;
+ 	int len, err, fput_needed;
+ 
+ 	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+@@ -1569,10 +1569,10 @@ asmlinkage long sys_getpeername(int fd, struct sockaddr __user *usockaddr,
+ 		}
+ 
+ 		err =
+-		    sock->ops->getname(sock, (struct sockaddr *)address, &len,
++		    sock->ops->getname(sock, (struct sockaddr *)&address, &len,
+ 				       1);
+ 		if (!err)
+-			err = move_addr_to_user(address, len, usockaddr,
++			err = move_addr_to_user((struct sockaddr *)&address, len, usockaddr,
+ 						usockaddr_len);
+ 		fput_light(sock->file, fput_needed);
+ 	}
+@@ -1590,7 +1590,7 @@ asmlinkage long sys_sendto(int fd, void __user *buff, size_t len,
+ 			   int addr_len)
+ {
+ 	struct socket *sock;
+-	char address[MAX_SOCK_ADDR];
++	struct sockaddr_storage address;
+ 	int err;
+ 	struct msghdr msg;
+ 	struct iovec iov;
+@@ -1609,10 +1609,10 @@ asmlinkage long sys_sendto(int fd, void __user *buff, size_t len,
+ 	msg.msg_controllen = 0;
+ 	msg.msg_namelen = 0;
+ 	if (addr) {
+-		err = move_addr_to_kernel(addr, addr_len, address);
++		err = move_addr_to_kernel(addr, addr_len, (struct sockaddr *)&address);
+ 		if (err < 0)
+ 			goto out_put;
+-		msg.msg_name = address;
++		msg.msg_name = &address;
+ 		msg.msg_namelen = addr_len;
+ 	}
+ 	if (sock->file->f_flags & O_NONBLOCK)
+@@ -1648,7 +1648,7 @@ asmlinkage long sys_recvfrom(int fd, void __user *ubuf, size_t size,
+ 	struct socket *sock;
+ 	struct iovec iov;
+ 	struct msghdr msg;
+-	char address[MAX_SOCK_ADDR];
++	struct sockaddr_storage address;
+ 	int err, err2;
+ 	int fput_needed;
+ 
+@@ -1662,14 +1662,15 @@ asmlinkage long sys_recvfrom(int fd, void __user *ubuf, size_t size,
+ 	msg.msg_iov = &iov;
+ 	iov.iov_len = size;
+ 	iov.iov_base = ubuf;
+-	msg.msg_name = address;
+-	msg.msg_namelen = MAX_SOCK_ADDR;
++	msg.msg_name = &address;
++	msg.msg_namelen = sizeof(address);
+ 	if (sock->file->f_flags & O_NONBLOCK)
+ 		flags |= MSG_DONTWAIT;
+ 	err = sock_recvmsg(sock, &msg, size, flags);
+ 
+ 	if (err >= 0 && addr != NULL) {
+-		err2 = move_addr_to_user(address, msg.msg_namelen, addr, addr_len);
++		err2 = move_addr_to_user((struct sockaddr *)&address,
++					 msg.msg_namelen, addr, addr_len);
+ 		if (err2 < 0)
+ 			err = err2;
+ 	}
+@@ -1789,7 +1790,7 @@ asmlinkage long sys_sendmsg(int fd, struct msghdr __user *msg, unsigned flags)
+ 	struct compat_msghdr __user *msg_compat =
+ 	    (struct compat_msghdr __user *)msg;
+ 	struct socket *sock;
+-	char address[MAX_SOCK_ADDR];
++	struct sockaddr_storage address;
+ 	struct iovec iovstack[UIO_FASTIOV], *iov = iovstack;
+ 	unsigned char ctl[sizeof(struct cmsghdr) + 20]
+ 	    __attribute__ ((aligned(sizeof(__kernel_size_t))));
+@@ -1827,9 +1828,12 @@ asmlinkage long sys_sendmsg(int fd, struct msghdr __user *msg, unsigned flags)
+ 
+ 	/* This will also move the address data into kernel space */
+ 	if (MSG_CMSG_COMPAT & flags) {
+-		err = verify_compat_iovec(&msg_sys, iov, address, VERIFY_READ);
++		err = verify_compat_iovec(&msg_sys, iov,
++					  (struct sockaddr *)&address,
++					  VERIFY_READ);
+ 	} else
+-		err = verify_iovec(&msg_sys, iov, address, VERIFY_READ);
++		err = verify_iovec(&msg_sys, iov,
++				   (struct sockaddr *)&address, VERIFY_READ);
+ 	if (err < 0)
+ 		goto out_freeiov;
+ 	total_len = err;
+@@ -1900,7 +1904,7 @@ asmlinkage long sys_recvmsg(int fd, struct msghdr __user *msg,
+ 	int fput_needed;
+ 
+ 	/* kernel mode address */
+-	char addr[MAX_SOCK_ADDR];
++	struct sockaddr_storage addr;
+ 
+ 	/* user mode address pointers */
+ 	struct sockaddr __user *uaddr;
+@@ -1938,9 +1942,13 @@ asmlinkage long sys_recvmsg(int fd, struct msghdr __user *msg,
+ 	uaddr = (__force void __user *)msg_sys.msg_name;
+ 	uaddr_len = COMPAT_NAMELEN(msg);
+ 	if (MSG_CMSG_COMPAT & flags) {
+-		err = verify_compat_iovec(&msg_sys, iov, addr, VERIFY_WRITE);
++		err = verify_compat_iovec(&msg_sys, iov,
++					  (struct sockaddr *)&addr,
++					  VERIFY_WRITE);
+ 	} else
+-		err = verify_iovec(&msg_sys, iov, addr, VERIFY_WRITE);
++		err = verify_iovec(&msg_sys, iov,
++				   (struct sockaddr *)&addr,
++				   VERIFY_WRITE);
+ 	if (err < 0)
+ 		goto out_freeiov;
+ 	total_len = err;
+@@ -1956,7 +1964,8 @@ asmlinkage long sys_recvmsg(int fd, struct msghdr __user *msg,
+ 	len = err;
+ 
+ 	if (uaddr != NULL) {
+-		err = move_addr_to_user(addr, msg_sys.msg_namelen, uaddr,
++		err = move_addr_to_user((struct sockaddr *)&addr,
++					msg_sys.msg_namelen, uaddr,
+ 					uaddr_len);
+ 		if (err < 0)
+ 			goto out_freeiov;
+-- 
+1.6.3.2
+
