@@ -1,0 +1,34 @@
+From 8a8ee0aac07453d082c095d9cc8bb755df5e8457 Mon Sep 17 00:00:00 2001
+From: Juan Lang <juan.lang@ericsson.com>
+Date: Thu, 27 Aug 2009 09:30:46 -0700
+Subject: [PATCH] Define AF_NAME/PF_NAME
+
+---
+ include/linux/socket.h |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/include/linux/socket.h b/include/linux/socket.h
+index dc5086f..131fa25 100644
+--- a/include/linux/socket.h
++++ b/include/linux/socket.h
+@@ -190,7 +190,8 @@ struct ucred {
+ #define AF_IUCV		32	/* IUCV sockets			*/
+ #define AF_RXRPC	33	/* RxRPC sockets 		*/
+ #define AF_ISDN		34	/* mISDN sockets 		*/
+-#define AF_MAX		35	/* For now.. */
++#define AF_NAME		35	/* Name-oriented sockets	*/
++#define AF_MAX		36	/* For now.. */
+ 
+ /* Protocol families, same as address families. */
+ #define PF_UNSPEC	AF_UNSPEC
+@@ -227,6 +228,7 @@ struct ucred {
+ #define PF_IUCV		AF_IUCV
+ #define PF_RXRPC	AF_RXRPC
+ #define PF_ISDN		AF_ISDN
++#define PF_NAME		AF_NAME
+ #define PF_MAX		AF_MAX
+ 
+ /* Maximum queue length specifiable by listen.  */
+-- 
+1.6.0.4
+
