@@ -1,0 +1,195 @@
+From e815cbbc85735bb4b2ae3c5734ff731383a6e9c9 Mon Sep 17 00:00:00 2001
+From: Juan Lang <juan.lang@ericsson.com>
+Date: Fri, 18 Sep 2009 13:31:50 -0700
+Subject: [PATCH 2/2] Add Java portion of client
+
+---
+ Application.mk                                     |    2 +
+ project/AndroidManifest.xml                        |    3 +
+ project/src/com/ericsson/namestack/NameSocket.java |   50 ++++++++++++
+ .../com/ericsson/namestack/NameStackClient.java    |   82 ++++++++++++++++++++
+ 4 files changed, 137 insertions(+), 0 deletions(-)
+ create mode 100644 Application.mk
+ create mode 100644 project/src/com/ericsson/namestack/NameSocket.java
+
+diff --git a/Application.mk b/Application.mk
+new file mode 100644
+index 0000000..04ab500
+--- /dev/null
++++ b/Application.mk
+@@ -0,0 +1,2 @@
++APP_PROJECT_PATH := $(call my-dir)/project
++APP_MODULES := NameStackClient
+diff --git a/project/AndroidManifest.xml b/project/AndroidManifest.xml
+index bcd7a5a..74baead 100644
+--- a/project/AndroidManifest.xml
++++ b/project/AndroidManifest.xml
+@@ -12,4 +12,7 @@
+             </intent-filter>
+         </activity>
+     </application>
++    <service android:name="com.ericsson.namestackd.daemon"
++        android:process="remote" />
++    <uses-permission android:name="android.permission.INTERNET"/>
+ </manifest> 
+diff --git a/project/src/com/ericsson/namestack/NameSocket.java b/project/src/com/ericsson/namestack/NameSocket.java
+new file mode 100644
+index 0000000..61b2797
+--- /dev/null
++++ b/project/src/com/ericsson/namestack/NameSocket.java
+@@ -0,0 +1,50 @@
++package com.ericsson.namestack;
++
++import java.io.IOException;
++import java.net.BindException;
++import java.net.ConnectException;
++import java.net.SocketException;
++
++public class NameSocket
++{
++    private int fd;
++
++    static {
++        System.loadLibrary("NameStackClient");
++    }
++
++    private native int socket() throws SocketException;
++    private native void internalbind(int fd, String source, int port) throws BindException;
++    private native void internalclose(int fd) throws IOException;
++    private native void internalconnect(int fd, String dest, int port) throws ConnectException;
++    private native void internalsend(int fd, String msg) throws IOException;
++    private native String internalrecv(int fd) throws IOException;
++
++    public NameSocket() throws SocketException {
++        fd = socket();
++    }
++
++    protected void finalize() throws IOException {
++        internalclose(fd);
++    }
++
++    public void bind(String source, int port) throws BindException {
++        internalbind(fd, source, port);
++    }
++
++    public void connect(String dest, int port) throws ConnectException {
++        internalconnect(fd, dest, port);
++    }
++
++    public void send(String msg) throws IOException {
++        internalsend(fd, msg);
++    }
++
++    public String recv() throws IOException {
++        return internalrecv(fd);
++    }
++
++    public void close() throws IOException {
++        internalclose(fd);
++    }
++};
+diff --git a/project/src/com/ericsson/namestack/NameStackClient.java b/project/src/com/ericsson/namestack/NameStackClient.java
+index d90915a..ffc4e5c 100644
+--- a/project/src/com/ericsson/namestack/NameStackClient.java
++++ b/project/src/com/ericsson/namestack/NameStackClient.java
+@@ -1,15 +1,97 @@
+ package com.ericsson.namestack;
+ 
+ import android.app.Activity;
++import android.content.Context;
++import android.content.Intent;
+ import android.os.Bundle;
++import android.util.Log;
++import android.view.View;
++import android.view.View.OnClickListener;
++import android.widget.Button;
++import android.widget.EditText;
++import android.widget.TextView;
++
++import java.io.IOException;
++import java.net.BindException;
++import java.net.ConnectException;
++import java.net.SocketException;
++import com.ericsson.namestack.NameSocket;
+ 
+ public class NameStackClient extends Activity
+ {
++    static private final String LOG_TAG = "NameStackClient";
++
++    private OnClickListener mConnectListener = new OnClickListener() {
++        public void onClick(View v) {
++            TextView status = (TextView)findViewById(R.id.status);
++
++
++            status.setText("");
++
++            status.append("creating socket... ");
++            try {
++                NameSocket sock = new NameSocket();
++                status.append("succeeded!\n");
++                EditText source = (EditText)findViewById(R.id.sourcename);
++                if (source.length() > 0) {
++                    status.append("binding to " + source.getText() + "\n");
++                    try {
++                        /* source port is hardcoded to 0:  it doesn't seem
++                         * reasonable to put UI for this.
++                         */
++                        sock.bind(source.getText().toString(), 0);
++                    } catch (BindException e) {
++                        status.append("bind: " + e + "\n");
++                    }
++                }
++
++                EditText dest = (EditText)findViewById(R.id.destname);
++                if (dest.length() > 0) {
++                    status.append("connecting to " + dest.getText() + "\n");
++                    try {
++                        /* dest port is hardcoded to 5000:  it doesn't seem
++                         * reasonable to put UI for this.
++                         */
++                        sock.connect(dest.getText().toString(), 5000);
++                        sock.send("greetings from android!");
++                        status.append("received message: " + sock.recv() + "\n");
++                    } catch (ConnectException e) {
++                        status.append("connect: " + e + "\n");
++                    } catch (IOException e) {
++                        status.append("io error: " + e + "\n");
++                    }
++                }
++            } catch (SocketException e) {
++                status.append(e.toString());
++            }
++        }
++    };
++
+     /** Called when the activity is first created. */
+     @Override
+     public void onCreate(Bundle savedInstanceState)
+     {
+         super.onCreate(savedInstanceState);
+         setContentView(R.layout.main);
++
++        Button connectButton = (Button)findViewById(R.id.connect);
++        connectButton.setOnClickListener(mConnectListener);
++        try {
++            startService();
++        } catch (Exception e) {
++            Log.e(LOG_TAG, "couldn't create service", e);
++        }
++    }
++
++    private boolean started = false;
++    private void startService() {
++        if (!started) {
++            Intent i = new Intent();
++            i.setClassName("com.ericsson.namestackd", 
++                           "com.ericsson.namestackd.daemon");
++            startService(i);
++            Log.d(LOG_TAG, "startService()");
++            started = true;
++        }
+     }
+ }
+-- 
+1.6.3.2
+
