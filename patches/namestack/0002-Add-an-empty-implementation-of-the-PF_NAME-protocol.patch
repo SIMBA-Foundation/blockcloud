@@ -1,0 +1,53 @@
+From 74b4bace8eeecc1959d5e32161f2edfe9d23afe1 Mon Sep 17 00:00:00 2001
+From: Juan Lang <juan.lang@ericsson.com>
+Date: Thu, 10 Sep 2009 13:40:12 -0700
+Subject: [PATCH] Add an empty implementation of the PF_NAME protocol family
+
+---
+ Makefile  |    2 +-
+ af_name.c |   23 +++++++++++++++++++++++
+ 2 files changed, 24 insertions(+), 1 deletions(-)
+ create mode 100644 af_name.c
+
+diff --git a/Makefile b/Makefile
+index 646c650..2a9870b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,4 +1,4 @@
+-obj-m += namestack.o
++obj-m += namestack.o af_name.o
+ namestack-objs := main.o
+ 
+ # ordinary compiles:
+diff --git a/af_name.c b/af_name.c
+new file mode 100644
+index 0000000..5e8b771
+--- /dev/null
++++ b/af_name.c
+@@ -0,0 +1,23 @@
++#include <linux/types.h>
++#include <linux/socket.h>
++#include <linux/net.h>
++#include <linux/module.h>
++
++static int name_create(struct net *net, struct socket *sock, int protocol)
++{
++	return 0;
++}
++
++static struct net_proto_family name_family_ops = {
++	.family = PF_NAME,
++	.create = name_create,
++	.owner = THIS_MODULE,
++};
++
++static int __init name_init(void)
++{
++	(void)sock_register(&name_family_ops);
++	return 0;
++}
++
++fs_initcall(name_init);
+-- 
+1.6.0.4
+
