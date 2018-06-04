@@ -1,0 +1,126 @@
+From 4fb99a0603665f90f2882e14f70d4276f327a780 Mon Sep 17 00:00:00 2001
+From: Juan Lang <juan.lang@ericsson.com>
+Date: Thu, 10 Sep 2009 13:40:23 -0700
+Subject: [PATCH] Add first stab at initialization of PF_NAME protocol family
+
+---
+ af_name.c |   93 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 files changed, 90 insertions(+), 3 deletions(-)
+
+diff --git a/af_name.c b/af_name.c
+index 5e8b771..28f4cff 100644
+--- a/af_name.c
++++ b/af_name.c
+@@ -2,10 +2,86 @@
+ #include <linux/socket.h>
+ #include <linux/net.h>
+ #include <linux/module.h>
++#include <net/sock.h>
++#include <linux/inname.h>
++
++struct name_sock
++{
++	struct sock sk;
++	struct name_addr sname;
++	struct name_addr dname;
++};
++
++static struct proto name_stream_proto = {
++	.name = "NAME_STREAM",
++	.owner = THIS_MODULE,
++	.obj_size = sizeof(struct name_sock),
++};
++
++static struct proto name_dgram_proto = {
++	.name = "NAME_DGRAM",
++	.owner = THIS_MODULE,
++	.obj_size = sizeof(struct name_sock),
++};
++
++static inline struct name_sock *name_sk(const struct sock *sk)
++{
++	return (struct name_sock *)sk;
++}
++
++static struct sock *name_alloc_socket(struct net *net, struct proto *proto)
++{
++	struct sock *sk = sk_alloc(net, AF_NAME, GFP_ATOMIC, proto);
++	struct name_sock *name;
++
++	if (!sk)
++		goto out;
++
++	sock_init_data(NULL, sk);
++
++	name = name_sk(sk);
++	name->sname.name[0] = 0;
++	name->dname.name[0] = 0;
++out:
++	return sk;
++}
+ 
+ static int name_create(struct net *net, struct socket *sock, int protocol)
+ {
+-	return 0;
++	struct sock *sk;
++	struct name_sock *name;
++	struct proto *proto;
++	int rc;
++
++	if (net != &init_net)
++		return -EAFNOSUPPORT;
++
++	rc = 0;
++	switch (sock->type)
++	{
++	case SOCK_STREAM:
++		proto = &name_stream_proto;
++		break;
++	case SOCK_DGRAM:
++		proto = &name_dgram_proto;
++		break;
++	default:
++		rc = -EPROTONOSUPPORT;
++	}
++	if (rc)
++		goto out;
++
++	rc = -ENOMEM;
++	if (!(sk = name_alloc_socket(net, proto)))
++		goto out;
++
++	name = name_sk(sk);
++
++	sock_init_data(sock, sk);
++
++	rc = 0;
++out:
++	return rc;
+ }
+ 
+ static struct net_proto_family name_family_ops = {
+@@ -16,8 +92,19 @@ static struct net_proto_family name_family_ops = {
+ 
+ static int __init name_init(void)
+ {
+-	(void)sock_register(&name_family_ops);
+-	return 0;
++	int rc;
++
++	rc = proto_register(&name_stream_proto, 1);
++	if (rc)
++		goto out;
++
++	rc = proto_register(&name_dgram_proto, 1);
++	if (rc)
++		goto out;
++
++	rc = sock_register(&name_family_ops);
++out:
++	return rc;
+ }
+ 
+ fs_initcall(name_init);
+-- 
+1.6.0.4
+
