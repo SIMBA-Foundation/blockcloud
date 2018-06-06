@@ -2,6 +2,12 @@
 
 An blockchain-based advanced TCP/IP architecture connecting every dots of your life.visit https://www.block-cloud.io/
 
+## Whitepaper
+
+visit [whitepaper](./whitepaper.pdf)
+
+--
+
 ## Application Scenarios
 
 * Internet of Vehicles
